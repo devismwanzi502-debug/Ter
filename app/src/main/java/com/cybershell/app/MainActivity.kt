@@ -21,7 +21,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.BufferedReader
+import java.io.InputStreamReader
 
 class MainActivity : ComponentActivity() {
 
@@ -30,15 +34,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // KEEP SCREEN ON WHILE APP IS IN FOREGROUND
+        // KEEP SCREEN ON WHILE APP IS ACTIVE
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // ACQUIRE WAKE LOCK FOR BACKGROUND COMMANDS
+        // ACQUIRE WAKE LOCK TO PREVENT PROCESS SLEEPING
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "CyberShell::CommandWakeLock"
-        ).apply { acquire(10 * 60 * 1000L) } // Hold for up to 10 mins
+        ).apply { acquire(10 * 60 * 1000L) }
 
         setContent {
             MaterialTheme {
@@ -54,7 +58,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // RELEASE WAKE LOCK WHEN APP IS CLOSED
         if (wakeLock?.isHeld == true) {
             wakeLock?.release()
         }
@@ -63,7 +66,6 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun TerminalScreen() {
-    // FIX 1 & 2: REMEMBER STATE SO OUTPUT DOES NOT DISAPPEAR ON RECOMPOSE
     val logs = remember { mutableStateListOf("Welcome to CyberShell v1.0.0", "Type a command below...") }
     var inputText by remember { mutableStateOf("") }
     
@@ -111,20 +113,41 @@ fun TerminalScreen() {
             keyboardActions = KeyboardActions(
                 onDone = {
                     if (inputText.isNotBlank()) {
-                        val command = inputText
-                        // 1. APPEND COMMAND TO LOGS
-                        logs.add("cybershell$ $command")
-                        
-                        // 2. CLEAR INPUT BOX
+                        val userCmd = inputText
+                        logs.add("cybershell$ $userCmd")
                         inputText = ""
 
-                        // 3. AUTO-SCROLL TO BOTTOM
+                        // EXECUTE SHELL COMMAND ASYNCHRONOUSLY
                         coroutineScope.launch {
+                            val result = executeCommand(userCmd)
+                            logs.addAll(result.trim().split("\n"))
                             listState.animateScrollToItem(logs.size - 1)
                         }
                     }
                 }
             )
         )
+    }
+}
+
+// EXECUTION HELPER FOR SYSTEM COMMANDS
+suspend fun executeCommand(command: String): String = withContext(Dispatchers.IO) {
+    return@withContext try {
+        val process = ProcessBuilder("/system/bin/sh", "-c", command)
+            .redirectErrorStream(true)
+            .start()
+
+        val reader = BufferedReader(InputStreamReader(process.inputStream))
+        val output = StringBuilder()
+        var line: String?
+
+        while (reader.readLine().also { line = it } != null) {
+            output.append(line).append("\n")
+        }
+
+        process.waitFor()
+        output.toString().ifEmpty { "Command executed with no output." }
+    } catch (e: Exception) {
+        "Error executing command: ${e.localizedMessage}"
     }
 }
