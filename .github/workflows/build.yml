@@ -23,6 +23,8 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.2'
 
       - name: Build Debug APK
         run: gradle assembleDebug --stacktrace
@@ -32,4 +34,3 @@ jobs:
         with:
           name: CyberShell-Debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
-          
