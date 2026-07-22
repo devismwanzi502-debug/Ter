@@ -76,13 +76,13 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun TerminalScreen() {
     val context = LocalContext.current
-    val appDir = context.filesDir
+    var currentDir by remember { mutableStateOf(context.filesDir) }
 
     val logs = remember { 
         mutableStateListOf(
             "========================================",
             "  CyberShell v1.0.0 - Secure Environment",
-            "  Working Directory: ${appDir.name}",
+            "  Working Directory: ${currentDir.absolutePath}",
             "========================================"
         ) 
     }
@@ -116,7 +116,6 @@ fun TerminalScreen() {
                 .padding(innerPadding)
                 .padding(12.dp)
         ) {
-            // TERMINAL OUTPUT SCREEN
             Card(
                 modifier = Modifier
                     .weight(1f)
@@ -144,7 +143,6 @@ fun TerminalScreen() {
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // COMMAND INPUT BAR
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -172,14 +170,32 @@ fun TerminalScreen() {
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(
                         onDone = {
-                            if (inputText.isNotBlank()) {
-                                val userCmd = inputText
+                            val userCmd = inputText.trim()
+                            if (userCmd.isNotEmpty()) {
                                 logs.add("cybershell$ $userCmd")
                                 inputText = ""
 
                                 coroutineScope.launch {
-                                    val result = executeCommand(userCmd, appDir)
-                                    logs.addAll(result.trim().split("\n"))
+                                    if (userCmd.startsWith("cd ")) {
+                                        val target = userCmd.removePrefix("cd ").trim()
+                                        if (target == "..") {
+                                            currentDir.parentFile?.let { parent ->
+                                                if (parent.absolutePath.startsWith(context.filesDir.absolutePath)) {
+                                                    currentDir = parent
+                                                }
+                                            }
+                                        } else {
+                                            val newDir = File(currentDir, target)
+                                            if (newDir.exists() && newDir.isDirectory) {
+                                                currentDir = newDir
+                                            } else {
+                                                logs.add("cd: no such file or directory: $target")
+                                            }
+                                        }
+                                    } else {
+                                        val result = executeSystemCommand(userCmd, currentDir)
+                                        logs.addAll(result.trim().split("\n"))
+                                    }
                                     listState.animateScrollToItem(logs.size - 1)
                                 }
                             }
@@ -198,7 +214,7 @@ fun TerminalScreen() {
     }
 }
 
-suspend fun executeCommand(command: String, workingDir: File): String = withContext(Dispatchers.IO) {
+suspend fun executeSystemCommand(command: String, workingDir: File): String = withContext(Dispatchers.IO) {
     return@withContext try {
         val process = ProcessBuilder("/system/bin/sh", "-c", command)
             .directory(workingDir)
