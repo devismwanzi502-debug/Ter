@@ -15,9 +15,12 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -25,6 +28,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 
 class MainActivity : ComponentActivity() {
@@ -34,10 +38,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // KEEP SCREEN ON WHILE APP IS ACTIVE
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // ACQUIRE WAKE LOCK TO PREVENT PROCESS SLEEPING
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
@@ -45,10 +47,16 @@ class MainActivity : ComponentActivity() {
         ).apply { acquire(10 * 60 * 1000L) }
 
         setContent {
-            MaterialTheme {
+            MaterialTheme(
+                colorScheme = darkColorScheme(
+                    primary = Color(0xFF00FF66),
+                    background = Color(0xFF0A0A0A),
+                    surface = Color(0xFF121212)
+                )
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = Color.Black
+                    color = MaterialTheme.colorScheme.background
                 ) {
                     TerminalScreen()
                 }
@@ -64,76 +72,136 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TerminalScreen() {
-    val logs = remember { mutableStateListOf("Welcome to CyberShell v1.0.0", "Type a command below...") }
+    val context = LocalContext.current
+    val appDir = context.filesDir
+
+    val logs = remember { 
+        mutableStateListOf(
+            "========================================",
+            "  CyberShell v1.0.0 - Secure Environment",
+            "  Working Directory: ${appDir.name}",
+            "========================================"
+        ) 
+    }
     var inputText by remember { mutableStateOf("") }
     
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .padding(16.dp)
-    ) {
-        // TERMINAL OUTPUT DISPLAY
-        LazyColumn(
-            state = listState,
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { 
+                    Text(
+                        "CyberShell Terminal", 
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF00FF66)
+                    ) 
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color(0xFF121212)
+                )
+            )
+        },
+        containerColor = Color(0xFF0A0A0A)
+    ) { innerPadding ->
+        Column(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(12.dp)
         ) {
-            items(logs) { line ->
-                Text(
-                    text = line,
-                    color = Color.Green,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(vertical = 2.dp)
+            // TERMINAL OUTPUT SCREEN
+            Card(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF050505)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(10.dp)
+                ) {
+                    items(logs) { line ->
+                        Text(
+                            text = line,
+                            color = if (line.startsWith("cybershell$")) Color(0xFF33CCFF) else Color(0xFF00FF66),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // COMMAND INPUT BAR
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = inputText,
+                    onValueChange = { inputText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = LocalTextStyle.current.copy(
+                        color = Color(0xFF00FF66),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 14.sp
+                    ),
+                    singleLine = true,
+                    placeholder = { Text("type command (e.g. ls, pwd)...", color = Color.DarkGray, fontFamily = FontFamily.Monospace) },
+                    leadingIcon = {
+                        Text(
+                            "$ ",
+                            color = Color(0xFF33CCFF),
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
+                    },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (inputText.isNotBlank()) {
+                                val userCmd = inputText
+                                logs.add("cybershell$ $userCmd")
+                                inputText = ""
+
+                                coroutineScope.launch {
+                                    val result = executeCommand(userCmd, appDir)
+                                    logs.addAll(result.trim().split("\n"))
+                                    listState.animateScrollToItem(logs.size - 1)
+                                }
+                            }
+                        }
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF00FF66),
+                        unfocusedBorderColor = Color(0xFF33CCFF).copy(alpha = 0.4f),
+                        cursorColor = Color(0xFF00FF66),
+                        focusedContainerColor = Color(0xFF121212),
+                        unfocusedContainerColor = Color(0xFF121212)
+                    )
                 )
             }
         }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // COMMAND INPUT FIELD
-        OutlinedTextField(
-            value = inputText,
-            onValueChange = { inputText = it },
-            modifier = Modifier.fillMaxWidth(),
-            textStyle = LocalTextStyle.current.copy(
-                color = Color.Green,
-                fontFamily = FontFamily.Monospace
-            ),
-            singleLine = true,
-            placeholder = { Text("Enter command...", color = Color.Gray) },
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(
-                onDone = {
-                    if (inputText.isNotBlank()) {
-                        val userCmd = inputText
-                        logs.add("cybershell$ $userCmd")
-                        inputText = ""
-
-                        // EXECUTE SHELL COMMAND ASYNCHRONOUSLY
-                        coroutineScope.launch {
-                            val result = executeCommand(userCmd)
-                            logs.addAll(result.trim().split("\n"))
-                            listState.animateScrollToItem(logs.size - 1)
-                        }
-                    }
-                }
-            )
-        )
     }
 }
 
-// EXECUTION HELPER FOR SYSTEM COMMANDS
-suspend fun executeCommand(command: String): String = withContext(Dispatchers.IO) {
+suspend fun executeCommand(command: String, workingDir: File): String = withContext(Dispatchers.IO) {
     return@withContext try {
         val process = ProcessBuilder("/system/bin/sh", "-c", command)
+            .directory(workingDir)
             .redirectErrorStream(true)
             .start()
 
